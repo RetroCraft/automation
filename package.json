@@ -4,7 +4,7 @@
   "description": "Assorted automation tasks",
   "main": "index.js",
   "scripts": {
-    "deploy": "gcloud functions deploy classroomTodoist --runtime nodejs10 --trigger-topic gclass --entry-point classroomTodoist"
+    "deploy": "gcloud functions deploy classroomTodoist --runtime nodejs10 --trigger-topic minute --entry-point classroomTodoist"
   },
   "author": "James Ah Yong <james@retrocraft.ca>",
   "license": "MIT",

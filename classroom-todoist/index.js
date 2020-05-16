@@ -68,7 +68,7 @@ async function sync() {
       // generate data format
       const data = {
         google: assignment.id,
-        class: 'english',
+        class: course.name,
         link: assignment.alternateLink,
         title: assignment.title,
         state: assignment.state || null,
@@ -134,8 +134,8 @@ async function sync() {
   }
 }
 
-module.exports.entry = () => {
-  sync().catch(e => console.error(e));
+module.exports.entry = async () => {
+  await sync().catch(e => console.error(e));
 }
 
 if (require.main === module) {
