@@ -1,0 +1,16 @@
+{
+  "name": "automation",
+  "version": "0.0.1",
+  "description": "Assorted automation tasks",
+  "main": "index.js",
+  "scripts": {
+    "deploy": "gcloud functions deploy classroomTodoist --runtime nodejs10 --trigger-topic gclass --entry-point classroomTodoist"
+  },
+  "author": "James Ah Yong <james@retrocraft.ca>",
+  "license": "MIT",
+  "dependencies": {
+    "@google-cloud/firestore": "^3.8.0",
+    "axios": "^0.19.2",
+    "googleapis": "^51.0.0"
+  }
+}
