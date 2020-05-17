@@ -8,7 +8,16 @@ Google Cloud Platform service account key required at `keyfile.auth.json` and AP
 
 ### classroom-todoist
 
-One-way sync between Google Classroom and Todoist.
+One-way sync from Google Classroom to Todoist.
 
 Requires Todoist API key in `todoist.auth.json` and a Google OAuth token in `token.auth.json` with the right scopes.
 Deployed to Google Cloud Functions and attached to Cloud Scheduler on every minute with Pub/Sub.
+
+#### Usage
+
+`node ./classroom-todoist [reset|token]`
+
+If no command specified, sync new Google Classroom assignments and announcements to Todoist.
+
+Run `reset` to delete all Todoist tasks and clear the Firestore cache.
+Run `token` and follow instructions to create an OAuth token in the working directory.

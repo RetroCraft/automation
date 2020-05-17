@@ -1,4 +1,4 @@
-const { get, post } = require('axios').default;
+const { get: GET, post: POST, delete: DELETE } = require('axios').default;
 const { google } = require('googleapis');
 const { ErrorReporting } = require('@google-cloud/error-reporting');
 const { Firestore, Timestamp } = require('@google-cloud/firestore');
@@ -55,7 +55,7 @@ async function sync() {
   for (const courseRef of courses) {
     const course = courseRef.data();
     // setup todoist structure
-    const label_ids = await ensureTodoistLabels(['homework', 'automation'], headers);
+    const label_ids = await ensureTodoistLabels(['homework', 'automation', 'classroom'], headers);
     const assignmentSection = await ensureTodoistSection(course.todoist, 'automation: classroom assignments', headers);
     const miscSection = await ensureTodoistSection(course.todoist, 'automation: classroom misc', headers);
 
@@ -110,7 +110,7 @@ async function sync() {
           if (data.dueDate) {
             postData.due_datetime = data.dueDate.toDate().toISOString()
           }
-          res = await post('https://api.todoist.com/rest/v1/tasks', postData, headers)
+          res = await POST('https://api.todoist.com/rest/v1/tasks', postData, headers)
           Object.assign(data, { todoist: res.data.id });
         }
       } else {
@@ -118,11 +118,11 @@ async function sync() {
         // update task if things have changed
         if (data.state !== old.state) {
           if (data.state === 'TURNED_IN') {
-            await post(`https://api.todoist.com/rest/v1/tasks/${old.todoist}/close`, {}, headers);
+            await POST(`https://api.todoist.com/rest/v1/tasks/${old.todoist}/close`, {}, headers);
           } else if (data.state === 'RECLAIMED_BY_STUDENT') {
-            await post(`https://api.todoist.com/rest/v1/tasks/${old.todoist}/reopen`, {}, headers);
+            await POST(`https://api.todoist.com/rest/v1/tasks/${old.todoist}/reopen`, {}, headers);
           } else if (data.state === 'RETURNED') {
-            await post('https://api.todoist.com/rest/v1/tasks', {
+            await POST('https://api.todoist.com/rest/v1/tasks', {
               content: `**Returned assignment:** [${ellipsis(data.title)}](${data.link})`,
               priority: 1,
               project_id: course.todoist,
@@ -135,7 +135,7 @@ async function sync() {
           data.title !== old.title ||
           (data.dueDate && old.dueDate && !data.dueDate.isEqual(old.dueDate))
         ) {
-          await post(`https://api.todoist.com/rest/v1/tasks/${old.todoist}`, {
+          await POST(`https://api.todoist.com/rest/v1/tasks/${old.todoist}`, {
             content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
             due_datetime: data.dueDate.toDate().toISOString(),
           }, headers)
@@ -153,23 +153,17 @@ async function sync() {
       orderBy: 'updateTime desc'
     });
     const { announcements } = res.data;
-    const lastAnnouncement = announcements.length > 0
+    const latest = announcements.length > 0
       ? Timestamp.fromDate(new Date(announcements[0].updateTime))
       : Timestamp.fromMillis(0);
-
-    // setup for announcements
-    if (!course.lastAnnouncement) {
-      await db.collection('classroom-classes').doc(courseRef.id).set({
-        lastAnnouncement
-      }, { merge: true })
-    }
+    const last = course.lastAnnouncement ? course.lastAnnouncement : Timestamp.fromMillis(0);
 
     // update todoist
-    if (lastAnnouncement > course.lastAnnouncement) {
+    if (latest > last) {
       await Promise.all(announcements
         .filter(announcement => Timestamp.fromDate(new Date(announcement.updateTime)) > course.lastAnnouncement)
         .map(async (announcement) => {
-          await post('https://api.todoist.com/rest/v1/tasks', {
+          await POST('https://api.todoist.com/rest/v1/tasks', {
             content: `**Check announcement:** [${ellipsis(announcement.text)}](${announcement.alternateLink})`,
             priority: 1,
             project_id: course.todoist,
@@ -178,7 +172,24 @@ async function sync() {
           }, headers)
         }));
     }
+
+    // update database
+    await courseRef.ref.set({ lastAnnouncement: latest }, { merge: true });
   }
+}
+
+async function reset() {
+  // delete todoist tasks
+  const [label] = await ensureTodoistLabels(['automation'], headers);
+  const res = await GET(`https://api.todoist.com/rest/v1/tasks?label_id=${label}`, headers);
+  console.log(`Deleting ${res.data.length} tasks...`);
+  await Promise.all(res.data.map(task => DELETE(`https://api.todoist.com/rest/v1/tasks/${task.id}`, headers)));
+  // delete coursework cache
+  const snapshot = await db.collection('classroom-tasks').orderBy('__name__').get();
+  console.log(`Deleting ${snapshot.size} documents...`);
+  const batch = db.batch();
+  snapshot.forEach(doc => batch.delete(doc.ref));
+  await batch.commit();
 }
 
 module.exports.entry = async () => {
@@ -189,6 +200,7 @@ module.exports.entry = async () => {
 }
 
 if (require.main === module) {
-  // getNewToken(client, SCOPES);
-  sync().catch(e => console.error(e));
+  if (process.argv[2] === 'token') getNewToken(client, SCOPES);
+  else if (process.argv[2] === 'reset') reset().catch(e => console.error(e));
+  else sync().catch(e => console.error(e));
 }
