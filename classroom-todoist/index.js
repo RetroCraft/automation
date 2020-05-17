@@ -3,7 +3,13 @@ const { google } = require('googleapis');
 const { ErrorReporting } = require('@google-cloud/error-reporting');
 const { Firestore, Timestamp } = require('@google-cloud/firestore');
 
-const { authorize, snapshotMap, ensureTodoistLabels, ensureTodoistSection } = require('../utils');
+const {
+  authorize,
+  snapshotMap,
+  ensureTodoistLabels,
+  ensureTodoistSection,
+  ellipsis
+} = require('../utils');
 
 // constants
 const SCOPES = [
@@ -92,7 +98,7 @@ async function sync() {
         // create task if not exists and not already turned in
         if (data.state !== 'TURNED_IN' && data.state !== 'RETURNED') {
           const postData = {
-            content: `${data.title} ${data.link}`,
+            content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
             priority: 3,
             project_id: course.todoist,
             label_ids, section_id: assignmentSection,
@@ -113,10 +119,11 @@ async function sync() {
             await post(`https://api.todoist.com/rest/v1/tasks/${old.todoist}/reopen`, {}, headers);
           } else if (data.state === 'RETURNED') {
             await post('https://api.todoist.com/rest/v1/tasks', {
-              content: `Check returned assignment ${data.link}`,
+              content: `**Returned assignment:** [${ellipsis(data.title)}](${data.link})`,
               priority: 1,
               project_id: course.todoist,
               label_ids, section_id: miscSection,
+              due_string: 'today',
             }, headers)
           }
         }
@@ -125,7 +132,7 @@ async function sync() {
           (data.dueDate && old.dueDate && !data.dueDate.isEqual(old.dueDate))
         ) {
           await post(`https://api.todoist.com/rest/v1/tasks/${old.todoist}`, {
-            content: `${data.title} ${data.link}`,
+            content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
             due_datetime: data.dueDate.toDate().toISOString(),
           }, headers)
         }

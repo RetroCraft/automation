@@ -6,6 +6,19 @@ const { get, post } = axios.default;
 const { google } = require('googleapis');
 
 /**
+ * Truncate `str` at `len` with ending `end`.
+ * @param {string} str String to truncate
+ * @param {number} len Optimal length of string
+ * @param {string} end Tag onto end of string
+ */
+module.exports.ellipsis = (str, len = 50, end = '...') => {
+  if (str.length <= len) return str;
+  const re = new RegExp(`^.{${len}}(\\w+)?`);
+  const match = re.exec(str);
+  return match[0] + end;
+}
+
+/**
  * Create an OAuth2 client with the given credentials, and then execute the
  * given callback function.
  * @param {object} token token.auth.json
