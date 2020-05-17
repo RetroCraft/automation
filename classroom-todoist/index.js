@@ -5,6 +5,7 @@ const { Firestore, Timestamp } = require('@google-cloud/firestore');
 
 const {
   authorize,
+  getNewToken,
   snapshotMap,
   ensureTodoistLabels,
   ensureTodoistSection,
@@ -15,7 +16,7 @@ const {
 const SCOPES = [
   'https://www.googleapis.com/auth/classroom.courses.readonly',
   'https://www.googleapis.com/auth/classroom.coursework.me.readonly',
-  'https://www.googleapis.com/auth/classroom.push-notifications',
+  'https://www.googleapis.com/auth/classroom.announcements.readonly',
 ];
 module.exports.SCOPES = SCOPES;
 const CLASSES = [
@@ -49,9 +50,10 @@ async function sync() {
   let res;
   // get class information
   const query = await db.collection('classroom-classes').where('google', 'in', CLASSES).get();
-  const courses = await snapshotMap(query, doc => doc.data());
+  const courses = await snapshotMap(query, _ => _); // convert to array
 
-  for (const course of courses) {
+  for (const courseRef of courses) {
+    const course = courseRef.data();
     // setup todoist structure
     const label_ids = await ensureTodoistLabels(['homework', 'automation'], headers);
     const assignmentSection = await ensureTodoistSection(course.todoist, 'automation: classroom assignments', headers);
@@ -87,7 +89,7 @@ async function sync() {
         const { year, month, day } = assignment.dueDate;
         const hours = assignment.dueTime ? assignment.dueTime.hours : 0;
         const minutes = assignment.dueTime ? assignment.dueTime.minutes || 0 : 0;
-        const dueDate = new Timestamp(Date.UTC(year, month - 1, day, hours, minutes) / 1000, 0);
+        const dueDate = Timestamp.fromDate(new Date(Date.UTC(year, month - 1, day, hours, minutes)));
         Object.assign(data, { dueDate });
       }
 
@@ -120,7 +122,7 @@ async function sync() {
           } else if (data.state === 'RETURNED') {
             await post('https://api.todoist.com/rest/v1/tasks', {
               content: `**Returned assignment:** [${ellipsis(data.title)}](${data.link})`,
-              priority: 1,
+              priority: 4,
               project_id: course.todoist,
               label_ids, section_id: miscSection,
               due_string: 'today',
@@ -141,6 +143,39 @@ async function sync() {
       // update database
       await ref.set(data);
     }));
+
+    // get classroom announcements
+    res = await classroom.courses.announcements.list({
+      courseId: course.google,
+      fields: 'announcements(text,alternateLink,updateTime)',
+      orderBy: 'updateTime desc'
+    });
+    const { announcements } = res.data;
+    const lastAnnouncement = announcements.length > 0
+      ? Timestamp.fromDate(new Date(announcements[0].updateTime))
+      : Timestamp.fromMillis(0);
+
+    // setup for announcements
+    if (!course.lastAnnouncement) {
+      await db.collection('classroom-classes').doc(courseRef.id).set({
+        lastAnnouncement
+      }, { merge: true })
+    }
+
+    // update todoist
+    if (lastAnnouncement > course.lastAnnouncement) {
+      await Promise.all(announcements
+        .filter(announcement => Timestamp.fromDate(new Date(announcement.updateTime)) > course.lastAnnouncement)
+        .map(async (announcement) => {
+          await post('https://api.todoist.com/rest/v1/tasks', {
+            content: `**Check announcement:** [${ellipsis(announcement.text)}](${announcement.alternateLink})`,
+            priority: 4,
+            project_id: course.todoist,
+            label_ids, section_id: miscSection,
+            due_string: 'today',
+          }, headers)
+        }));
+    }
   }
 }
 
@@ -152,5 +187,6 @@ module.exports.entry = async () => {
 }
 
 if (require.main === module) {
-  this.entry()
+  // getNewToken(client, SCOPES);
+  sync().catch(e => console.error(e));
 }
