@@ -62,7 +62,7 @@ async function sync() {
     // get classroom data
     res = await classroom.courses.courseWork.list({
       courseId: course.google,
-      fields: 'courseWork(id,title,dueDate,dueTime,alternateLink)'
+      fields: 'courseWork(id,title,dueDate,dueTime,maxPoints,alternateLink)'
     });
     const work = res.data.courseWork.reduce((acc, curr) => ({ ...acc, [curr.id]: curr }), {});
     res = await classroom.courses.courseWork.studentSubmissions.list({
@@ -83,6 +83,8 @@ async function sync() {
         link: assignment.alternateLink,
         title: assignment.title,
         state: assignment.state || null,
+        // ungraded (low) -> graded (mid) -> >10 points (high)
+        priority: assignment.maxPoints ? (assignment.maxPoints > 10 ? 4 : 3) : 2,
         dueDate: null,
       }
       if (assignment.dueDate) {
@@ -101,7 +103,7 @@ async function sync() {
         if (data.state !== 'TURNED_IN' && data.state !== 'RETURNED') {
           const postData = {
             content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
-            priority: 3,
+            priority: data.priority,
             project_id: course.todoist,
             label_ids, section_id: assignmentSection,
           }
@@ -122,7 +124,7 @@ async function sync() {
           } else if (data.state === 'RETURNED') {
             await post('https://api.todoist.com/rest/v1/tasks', {
               content: `**Returned assignment:** [${ellipsis(data.title)}](${data.link})`,
-              priority: 4,
+              priority: 1,
               project_id: course.todoist,
               label_ids, section_id: miscSection,
               due_string: 'today',
@@ -169,7 +171,7 @@ async function sync() {
         .map(async (announcement) => {
           await post('https://api.todoist.com/rest/v1/tasks', {
             content: `**Check announcement:** [${ellipsis(announcement.text)}](${announcement.alternateLink})`,
-            priority: 4,
+            priority: 1,
             project_id: course.todoist,
             label_ids, section_id: miscSection,
             due_string: 'today',
