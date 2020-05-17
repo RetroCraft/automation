@@ -1,5 +1,6 @@
 const { get, post } = require('axios').default;
 const { google } = require('googleapis');
+const { ErrorReporting } = require('@google-cloud/error-reporting');
 const { Firestore, Timestamp } = require('@google-cloud/firestore');
 
 const { authorize, snapshotMap, ensureTodoistLabels, ensureTodoistSection } = require('../utils');
@@ -28,13 +29,15 @@ const client = authorize(require('./token.auth.json'));
 const classroom = google.classroom({ version: 'v1', auth: client });
 
 const keyfile = require('../keyfile.auth.json');
-const db = new Firestore({
+const googleSettings = {
   projectId: 'random-api-things',
   credentials: {
     client_email: keyfile.client_email,
     private_key: keyfile.private_key
   },
-});
+};
+const db = new Firestore(googleSettings);
+const errors = new ErrorReporting(googleSettings);
 
 async function sync() {
   let res;
@@ -135,7 +138,10 @@ async function sync() {
 }
 
 module.exports.entry = async () => {
-  await sync().catch(e => console.error(e));
+  await sync().catch(e => {
+    console.error(e);
+    errors.report(e);
+  });
 }
 
 if (require.main === module) {
