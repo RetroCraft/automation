@@ -6,15 +6,17 @@ const { get, post } = axios.default;
 const { google } = require('googleapis');
 
 /**
- * Truncate `str` at `len` with ending `end`.
+ * Truncate the first line of `str` at `len` with ending `end`.
  * @param {string} str String to truncate
  * @param {number} len Optimal length of string
  * @param {string} end Tag onto end of string
  */
 module.exports.ellipsis = (str, len = 50, end = '...') => {
-  if (str.length <= len) return str;
+  const lines = str.split('\n');
+  if (str.length <= len && lines.length === 1) return str;
+  if (lines[0].length <= len) return lines[0] + end;
   const re = new RegExp(`^.{${len}}(\\w+)?`);
-  const match = re.exec(str);
+  const match = re.exec(lines[0]);
   return match[0] + end;
 }
 

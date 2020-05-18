@@ -115,8 +115,10 @@ async function sync() {
         }
       } else {
         const old = doc.data();
+        let update = false;
         // update task if things have changed
         if (data.state !== old.state) {
+          update = true;
           if (data.state === 'TURNED_IN') {
             await POST(`https://api.todoist.com/rest/v1/tasks/${old.todoist}/close`, {}, headers);
           } else if (data.state === 'RECLAIMED_BY_STUDENT') {
@@ -124,7 +126,7 @@ async function sync() {
           } else if (data.state === 'RETURNED') {
             await POST('https://api.todoist.com/rest/v1/tasks', {
               content: `**Returned assignment:** [${ellipsis(data.title)}](${data.link})`,
-              priority: 1,
+              priority: 4,
               project_id: course.todoist,
               label_ids, section_id: miscSection,
               due_string: 'today',
@@ -135,15 +137,15 @@ async function sync() {
           data.title !== old.title ||
           (data.dueDate && old.dueDate && !data.dueDate.isEqual(old.dueDate))
         ) {
+          update = true;
           await POST(`https://api.todoist.com/rest/v1/tasks/${old.todoist}`, {
             content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
             due_datetime: data.dueDate.toDate().toISOString(),
           }, headers)
         }
+        // update database
+        if (update) await ref.set(data);
       }
-
-      // update database
-      await ref.set(data);
     }));
 
     // get classroom announcements
@@ -165,7 +167,7 @@ async function sync() {
         .map(async (announcement) => {
           await POST('https://api.todoist.com/rest/v1/tasks', {
             content: `**Check announcement:** [${ellipsis(announcement.text)}](${announcement.alternateLink})`,
-            priority: 1,
+            priority: 4,
             project_id: course.todoist,
             label_ids, section_id: miscSection,
             due_string: 'today',
