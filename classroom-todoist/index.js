@@ -7,6 +7,8 @@ const { db, errors } = require('../google');
 const Todoist = require('../todoist');
 const {
   authorize,
+  formatDate,
+  formatDateTime,
   getNewToken,
   snapshotMap,
   ensureTodoistLabels,
@@ -40,8 +42,7 @@ const classroom = google.classroom({ version: 'v1', auth: client });
 
 async function sync() {
   let res;
-  // initialize todoist
-  await todoist.sync();
+  // todoist ids
   const tempIds = {};
   // get class information
   const query = await db.collection('classroom-classes').where('google', 'in', CLASSES).get();
@@ -86,8 +87,7 @@ async function sync() {
         const { year, month, day } = assignment.dueDate;
         const hours = assignment.dueTime ? assignment.dueTime.hours : 0;
         const minutes = assignment.dueTime ? assignment.dueTime.minutes || 0 : 0;
-        const dueDate = Timestamp.fromDate(new Date(Date.UTC(year, month - 1, day, hours, minutes)));
-        Object.assign(data, { dueDate });
+        data.dueDate = Timestamp.fromDate(new Date(Date.UTC(year, month - 1, day, hours, minutes)));
       }
 
       // compare with database
@@ -104,7 +104,8 @@ async function sync() {
             labels, section_id: assignmentSection,
           }
           if (data.dueDate) {
-            args.due_datetime = data.dueDate.toDate().toISOString()
+            const date = data.dueDate.toDate();
+            args.due = { date: data.dueTime ? formatDateTime(date) : formatDate(date) };
           }
           const temp_id = uuid();
           todoist.queue(dbId, { type: 'item_add', temp_id, args });
@@ -129,7 +130,7 @@ async function sync() {
                 priority: 4,
                 project_id: course.todoist,
                 label_ids: labels, section_id: miscSection,
-                due_string: 'today',
+                due: { string: 'today' },
               }
             });
           }
@@ -139,14 +140,15 @@ async function sync() {
           (data.dueDate && old.dueDate && !data.dueDate.isEqual(old.dueDate))
         ) {
           update = true;
-          todoist.queue(dbId, {
-            type: 'item_update',
-            args: {
-              id: old.todoist,
-              content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
-              due_datetime: data.dueDate.toDate().toISOString(),
-            }
-          });
+          const args = {
+            id: old.todoist,
+            content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
+          }
+          if (data.dueDate) {
+            const date = data.dueDate.toDate();
+            args.due = { date: data.dueTime ? formatDateTime(date) : formatDate(date) };
+          }
+          todoist.queue(dbId, { type: 'item_update', args });
         }
         // update database
         if (update) await ref.set(data);
@@ -175,7 +177,7 @@ async function sync() {
               priority: 4,
               project_id: course.todoist,
               labels, section_id: miscSection,
-              due_string: 'today',
+              due: { string: 'today' },
             }
           });
         });
@@ -187,8 +189,11 @@ async function sync() {
 
   // update todoist
   res = await todoist.sync();
-  for (const [temp, todoist] of Object.entries(res.temp_id_mapping)) {
-    db.collection('classroom-tasks').doc(tempIds[temp]).set({ todoist }, { merge: true });
+  for (const [temp, path] of Object.entries(tempIds)) {
+    db.collection('classroom-tasks').doc(path).set(
+      { todoist: res.temp_id_mapping[temp] },
+      { merge: true },
+    );
   }
 }
 
@@ -197,15 +202,16 @@ async function reset() {
   const [label] = await ensureTodoistLabels(['automation'], headers);
   const res = await GET(`https://api.todoist.com/rest/v1/tasks?label_id=${label}`, headers);
   console.log(`Deleting ${res.data.length} tasks...`);
-  await todoist.sync();
   res.data.forEach(({ id }) => todoist.queue(id, { type: 'item_delete', args: { id } }));
   await todoist.sync();
   // delete coursework cache
   const snapshot = await db.collection('classroom-tasks').orderBy('__name__').get();
-  console.log(`Deleting ${snapshot.size} documents...`);
-  const batch = db.batch();
-  snapshot.forEach(doc => batch.delete(doc.ref));
-  await batch.commit();
+  if (snapshot.size > 0) {
+    console.log(`Deleting ${snapshot.size} documents...`);
+    const batch = db.batch();
+    snapshot.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+  }
 }
 
 module.exports.entry = async () => {

@@ -20,6 +20,22 @@ module.exports.ellipsis = (str, len = 50, end = '...') => {
   return match[0] + end;
 };
 
+const pad = num => String(num).padStart(2, '0');
+/**
+ * Format Todoist-acceptable YYYY-MM-DD
+ * @param {Date} date
+ */
+const formatDate = (date) => {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+module.exports.formatDate = formatDate;
+/**
+ * Format Todoist-acceptable YYYY-MM-DDTHH:MM:SS
+ * @param {Date} date
+ */
+module.exports.formatDateTime = (date) =>
+  `${formatDate(date)}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+
 /**
  * Create an OAuth2 client with the given credentials, and then execute the
  * given callback function.

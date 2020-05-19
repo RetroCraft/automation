@@ -24,11 +24,8 @@ class Todoist {
     const res = await post('https://api.todoist.com/sync/v8/sync', {
       token: this.token,
       sync_token: this.sync_token,
-      commands: this.commands,
+      commands: JSON.stringify(this.commands),
     });
-    // reset state
-    this.sync_token = res.data.sync_token;
-    this.commands = [];
     // check command status
     if (res.data.sync_status) {
       for (const [id, status] of Object.entries(res.data.sync_status)) {
@@ -36,11 +33,16 @@ class Todoist {
         if (status === 'ok') {
           console.log(`[${name}] Todoist sync ok`);
         } else {
-          console.error(`[${name}] Todoist sync error ${status.error_code}: ${status.error}`);
-          errors.report(`[${name}] Todoist sync error ${status.error_code}: ${status.error}`);
+          let errString = `[${name}] Todoist sync error ${status.error_code}: ${status.error}`;
+          errString += `\n${JSON.stringify(this.commands.find(c => c.uuid === id))}`;
+          console.error(errString);
+          errors.report(errString);
         }
       }
     }
+    // reset state
+    this.sync_token = res.data.sync_token;
+    this.commands = [];
     return res.data;
   }
 
