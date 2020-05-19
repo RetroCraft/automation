@@ -18,7 +18,7 @@ module.exports.ellipsis = (str, len = 50, end = '...') => {
   const re = new RegExp(`^.{${len}}(\\w+)?`);
   const match = re.exec(lines[0]);
   return match[0] + end;
-}
+};
 
 /**
  * Create an OAuth2 client with the given credentials, and then execute the
@@ -31,7 +31,7 @@ module.exports.authorize = (token) => {
     client_id, client_secret, redirect_uris[0]);
   oAuth2Client.setCredentials(token);
   return oAuth2Client;
-}
+};
 
 /**
  * Get and store new token after prompting for user authorization, and then
@@ -95,7 +95,7 @@ module.exports.ensureTodoistLabels = async (labels, headers) => {
       return res.data.id;
     }
   }))
-}
+};
 
 /**
  * Get Todoist section ID by project ID and name, creating if it does not exist
@@ -113,4 +113,4 @@ module.exports.ensureTodoistSection = async (project_id, name, headers) => {
     res = await post('https://api.todoist.com/rest/v1/sections', { project_id, name }, headers);
     return res.data.id;
   }
-}
+};
