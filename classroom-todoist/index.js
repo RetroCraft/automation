@@ -214,7 +214,7 @@ async function sync() {
  */
 async function reset() {
   // delete todoist tasks
-  const [label] = await ensureTodoistLabels(['automation'], headers);
+  const [label] = await ensureTodoistLabels(['classroom'], headers);
   const res = await GET(`https://api.todoist.com/rest/v1/tasks?label_id=${label}`, headers);
   console.log(`Deleting ${res.data.length} tasks...`);
   res.data.forEach(({ id }) => todoist.queue(id, { type: 'item_delete', args: { id } }));
