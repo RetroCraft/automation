@@ -40,6 +40,15 @@ const todoist = new Todoist(todoistAuth.apiKey);
 const client = authorize(require('./token.auth.json'));
 const classroom = google.classroom({ version: 'v1', auth: client });
 
+/**
+ * Add user profile to Google Classroom URL (/u/[profile]/)
+ * @param {string} url
+ * @param {number} profile
+ */
+function formatURL(url, profile = 1) {
+  return url.replace('classroom.google.com/', `classroom.google.com/u/${profile}/`);
+}
+
 async function sync() {
   let res;
   // todoist ids
@@ -76,7 +85,7 @@ async function sync() {
       const data = {
         google: assignment.id,
         class: course.name,
-        link: assignment.alternateLink,
+        link: formatURL(assignment.alternateLink),
         title: assignment.title,
         state: assignment.state || null,
         // ungraded (low) -> graded (mid) -> >10 points (high)
@@ -94,9 +103,11 @@ async function sync() {
       const dbId = `${course.name}-${assignment.id}`;
       const ref = db.collection('classroom-tasks').doc(dbId);
       const doc = await ref.get();
+      let update = false;
       if (!doc.exists) {
         // create task if not exists and not already turned in
         if (data.state !== 'TURNED_IN' && data.state !== 'RETURNED') {
+          update = true;
           const args = {
             content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
             priority: data.priority,
@@ -113,7 +124,6 @@ async function sync() {
         }
       } else {
         const old = doc.data();
-        let update = false;
         // update task if things have changed
         if (data.state !== old.state) {
           update = true;
@@ -150,9 +160,10 @@ async function sync() {
           }
           todoist.queue(dbId, { type: 'item_update', args });
         }
-        // update database
-        if (update) await ref.set(data);
       }
+
+      // update database
+      if (update) await ref.set(data);
     }));
 
     // get classroom announcements
@@ -169,11 +180,12 @@ async function sync() {
 
     // update todoist
     if (latest > last) {
-      announcements.filter(announcement => Timestamp.fromDate(new Date(announcement.updateTime)) > course.lastAnnouncement)
-        .forEach(announcement => {
-          todoist.queue(`${course.name}-announcement-${announcement.id}`, {
+      announcements
+        .filter(ann => Timestamp.fromDate(new Date(ann.updateTime)) > course.lastAnnouncement)
+        .forEach(ann => {
+          todoist.queue(`${course.name}-announcement-${ann.id}`, {
             type: 'item_add', temp_id: uuid(), args: {
-              content: `**Check announcement:** [${ellipsis(announcement.text)}](${announcement.alternateLink})`,
+              content: `**Check announcement:** [${ellipsis(ann.text)}](${formatURL(ann.alternateLink)})`,
               priority: 4,
               project_id: course.todoist,
               labels, section_id: miscSection,
@@ -190,13 +202,16 @@ async function sync() {
   // update todoist
   res = await todoist.sync();
   for (const [temp, path] of Object.entries(tempIds)) {
-    db.collection('classroom-tasks').doc(path).set(
+    await db.collection('classroom-tasks').doc(path).set(
       { todoist: res.temp_id_mapping[temp] },
       { merge: true },
     );
   }
 }
 
+/**
+ * Reset tasks and Firebase cache
+ */
 async function reset() {
   // delete todoist tasks
   const [label] = await ensureTodoistLabels(['automation'], headers);
