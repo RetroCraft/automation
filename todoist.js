@@ -2,11 +2,12 @@ const { post } = require('axios').default;
 const { v4: uuid } = require('uuid');
 
 const { errors } = require('./google');
+const auth = require('./todoist.auth.json');
 
 class Todoist {
 
-  constructor(token) {
-    this.token = token;
+  constructor() {
+    this.token = auth.apiKey;
     this.sync_token = '*';
     this.commands = [];
     this.commandNames = {};
@@ -19,12 +20,23 @@ class Todoist {
     this.commands.push(Object.assign(command, { uuid: taskUuid }));
   }
 
+  async get(resources) {
+    console.log(`Fetching ${resources.join(', ')} from todoist...`);
+    const res = await post('https://api.todoist.com/sync/v8/sync', {
+      token: this.token,
+      sync_token: '*',
+      resource_types: JSON.stringify(resources),
+    });
+    this.sync_token = res.data.sync_token;
+    return res.data;
+  }
+
   async sync() {
     console.log(`Running ${this.commands.length} todoist commands...`);
     const res = await post('https://api.todoist.com/sync/v8/sync', {
       token: this.token,
       sync_token: this.sync_token,
-      commands: JSON.stringify(this.commands),
+      commands: JSON.stringify(this.commands)
     });
     // check command status
     if (res.data.sync_status) {
@@ -46,5 +58,44 @@ class Todoist {
     return res.data;
   }
 
+  /**
+   * Get Todoist label IDs by name, queueing creation if they do not exist
+   * @param {string[]} names Label names
+   * @returns {Promise<(number|string)[]>}
+   */
+  async ensureLabels(names) {
+    const { labels } = await this.get(['labels']);
+    const ids = names.map((name, i) => {
+      const label = labels.find(l => l.name === name);
+      if (label) {
+        return label.id;
+      } else {
+        const temp_id = uuid();
+        this.queue(name, { type: 'label_add', temp_id, args: { name } });
+        return temp_id;
+      }
+    });
+    return ids;
+  }
+
+  /**
+   * Get Todoist section ID by project ID and name, queueing creation if it does not exist
+   * @param {number} project_id Project ID
+   * @param {string} name Section name
+   * @returns {Promise<number|string>}
+   */
+  async ensureSection(project_id, name) {
+    const { sections } = await this.get(['sections']);
+    const section = sections.find(sec => (sec.project_id === project_id && sec.name === name));
+    if (section) {
+      return section.id;
+    } else {
+      const temp_id = uuid();
+      this.queue(name, { type: 'section_add', temp_id, args: { project_id, name } });
+      return temp_id;
+    }
+  }
+
 }
+
 module.exports = Todoist;

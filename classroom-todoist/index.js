@@ -11,8 +11,6 @@ const {
   formatDateTime,
   getNewToken,
   snapshotMap,
-  ensureTodoistLabels,
-  ensureTodoistSection,
   ellipsis
 } = require('../utils');
 
@@ -31,12 +29,7 @@ const CLASSES = [
 module.exports.CLASSES = CLASSES;
 
 // authorization
-const todoistAuth = require('./todoist.auth.json');
-const headers = {
-  headers: { Authorization: `Bearer ${todoistAuth.apiKey}` }
-};
-const todoist = new Todoist(todoistAuth.apiKey);
-
+const todoist = new Todoist();
 const client = authorize(require('./token.auth.json'));
 const classroom = google.classroom({ version: 'v1', auth: client });
 
@@ -56,13 +49,13 @@ async function sync() {
   // get class information
   const query = await db.collection('classroom-classes').where('google', 'in', CLASSES).get();
   const courses = await snapshotMap(query, _ => _); // convert to array
+  const labels = await todoist.ensureLabels(['homework', 'automation', 'classroom']);
 
   for (const courseRef of courses) {
     const course = courseRef.data();
     // setup todoist structure
-    const labels = await ensureTodoistLabels(['homework', 'automation', 'classroom'], headers);
-    const assignmentSection = await ensureTodoistSection(course.todoist, 'automation: classroom assignments', headers);
-    const miscSection = await ensureTodoistSection(course.todoist, 'automation: classroom misc', headers);
+    const assignmentSection = await todoist.ensureSection(course.todoist, 'automation: classroom assignments');
+    const miscSection = await todoist.ensureSection(course.todoist, 'automation: classroom misc');
 
     // get classroom data
     res = await classroom.courses.courseWork.list({
@@ -214,10 +207,11 @@ async function sync() {
  */
 async function reset() {
   // delete todoist tasks
-  const [label] = await ensureTodoistLabels(['classroom'], headers);
-  const res = await GET(`https://api.todoist.com/rest/v1/tasks?label_id=${label}`, headers);
-  console.log(`Deleting ${res.data.length} tasks...`);
-  res.data.forEach(({ id }) => todoist.queue(id, { type: 'item_delete', args: { id } }));
+  const [ label ] = await todoist.ensureLabels(['classroom']);
+  const res = await todoist.get(['items']);
+  const tasks = res.items.filter(({ labels }) => labels.includes(label));
+  console.log(`Deleting ${tasks.length} tasks...`);
+  tasks.forEach(({ id }) => todoist.queue(id, { type: 'item_delete', args: { id } }));
   await todoist.sync();
   // delete coursework cache
   const snapshot = await db.collection('classroom-tasks').orderBy('__name__').get();
