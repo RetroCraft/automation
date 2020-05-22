@@ -21,3 +21,10 @@ If no command specified, sync new Google Classroom assignments and announcements
 
 Run `reset` to delete all Todoist tasks and clear the Firestore cache.
 Run `token` and follow instructions to create an OAuth token in the working directory.
+
+### d2l-todoist
+
+One-way sync from D2L to Todoist.
+
+Requires D2L email and password in `d2l.auth.json`.
+Deployed to Google Cloud Functions and attached to Cloud Scheduler every half hour with Pub/Sub.

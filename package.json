@@ -4,7 +4,9 @@
   "description": "Assorted automation tasks",
   "main": "index.js",
   "scripts": {
-    "deploy": "gcloud functions deploy classroomTodoist --runtime nodejs10 --trigger-topic minute --entry-point classroomTodoist"
+    "deploy:classroomTodoist": "gcloud functions deploy classroomTodoist --runtime nodejs10 --trigger-topic minute --entry-point classroomTodoist",
+    "deploy:d2lTodoist": "gcloud functions deploy d2lTodoist --runtime nodejs10 --trigger-topic half-hour --entry-point d2lTodoist --memory 1024M",
+    "deploy": "deploy:classroomTodoist && deploy:d2lTodoist"
   },
   "author": "James Ah Yong <james@retrocraft.ca>",
   "license": "MIT",
@@ -14,7 +16,7 @@
     "axios": "^0.19.2",
     "cheerio": "^1.0.0-rc.3",
     "googleapis": "^51.0.0",
-    "puppeteer": "^3.1.0",
+    "puppeteer": "^2.1.1",
     "turndown": "^6.0.0",
     "uuid": "^8.0.0"
   }

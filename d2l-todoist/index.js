@@ -5,7 +5,7 @@ const Turndown = require('turndown');
 const puppeteer = require('puppeteer');
 const { v4: uuid } = require('uuid');
 
-const { db } = require('../google');
+const { db, errors } = require('../google');
 const Todoist = require('../todoist');
 const { ellipsis, snapshotMap } = require('../utils');
 
@@ -24,7 +24,11 @@ async function login() {
   const ref = db.collection('automation').doc('d2l');
   cache = (await ref.get()).data();
   if (!cache || !cache.cookie || cache.cookieExpire < Timestamp.now()) {
-    const browser = await puppeteer.launch({ headless: false });
+    // headless browser if in production mode
+    const browser = await puppeteer.launch({
+      headless: process.env.NODE_ENV === 'production',
+      args: ['--no-sandbox'],
+    });
     const page = await browser.newPage();
     await page.goto('https://pdsb.elearningontario.ca/d2l/home');
     const email = await page.waitForSelector('[aria-label^="Enter your email"]');
@@ -141,7 +145,6 @@ async function sync() {
             priority: 2,
             project_id: course.todoist,
             labels, section_id: assignmentSection,
-            due: { string: 'today' },
           }
         });
       }
