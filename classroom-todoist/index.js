@@ -52,7 +52,9 @@ async function sync() {
   const labels = await todoist.ensureLabels(['homework', 'automation', 'classroom']);
 
   for (const courseRef of courses) {
+    // get course data
     const course = courseRef.data();
+    const tasks = course.tasks || {};
     // setup todoist structure
     const assignmentSection = await todoist.ensureSection(course.todoist, 'automation: classroom assignments');
     const miscSection = await todoist.ensureSection(course.todoist, 'automation: classroom misc');
@@ -92,15 +94,12 @@ async function sync() {
         data.dueDate = Timestamp.fromDate(new Date(Date.UTC(year, month - 1, day, hours, minutes)));
       }
 
-      // compare with database
+      // compare with
       const dbId = `${course.name}-${assignment.id}`;
-      const ref = db.collection('classroom-tasks').doc(dbId);
-      const doc = await ref.get();
-      let update = false;
-      if (!doc.exists) {
+      const old = tasks[assignment.id] || null;
+      if (!old) {
         // create task if not exists and not already turned in
         if (data.state !== 'TURNED_IN' && data.state !== 'RETURNED') {
-          update = true;
           const args = {
             content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
             priority: data.priority,
@@ -113,18 +112,21 @@ async function sync() {
           }
           const temp_id = uuid();
           todoist.queue(dbId, { type: 'item_add', temp_id, args });
-          tempIds[temp_id] = dbId;
+          tempIds[assignment.id] = temp_id;
         }
       } else {
-        const old = doc.data();
+        const oldId = old.todoist;
         // update task if things have changed
         if (data.state !== old.state) {
-          update = true;
-          if (data.state === 'TURNED_IN') {
-            todoist.queue(dbId, { type: 'item_close', args: { id: old.todoist } });
-          } else if (data.state === 'RECLAIMED_BY_STUDENT') {
-            todoist.queue(dbId, { type: 'item_uncomplete', args: { id: old.todoist } });
-          } else if (data.state === 'RETURNED') {
+          if (oldId) {
+            if (data.state === 'TURNED_IN') {
+              todoist.queue(dbId, { type: 'item_close', args: { id: oldId } });
+            }
+            if (data.state === 'RECLAIMED_BY_STUDENT') {
+              todoist.queue(dbId, { type: 'item_uncomplete', args: { id: oldId } });
+            }
+          }
+          if (data.state === 'RETURNED') {
             todoist.queue(dbId, {
               type: 'item_add',
               temp_id: uuid(),
@@ -132,7 +134,7 @@ async function sync() {
                 content: `**Returned assignment:** [${ellipsis(data.title)}](${data.link})`,
                 priority: 4,
                 project_id: course.todoist,
-                label_ids: labels, section_id: miscSection,
+                labels, section_id: miscSection,
                 due: { string: 'today' },
               }
             });
@@ -142,21 +144,22 @@ async function sync() {
           data.title !== old.title ||
           (data.dueDate && old.dueDate && !data.dueDate.isEqual(old.dueDate))
         ) {
-          update = true;
-          const args = {
-            id: old.todoist,
-            content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
+          if (oldId) {
+            const args = {
+              id: oldId,
+              content: `**Assignment:** [${ellipsis(data.title)}](${data.link})`,
+            }
+            if (data.dueDate) {
+              const date = data.dueDate.toDate();
+              args.due = { date: data.dueTime ? formatDateTime(date) : formatDate(date) };
+            }
+            todoist.queue(dbId, { type: 'item_update', args });
           }
-          if (data.dueDate) {
-            const date = data.dueDate.toDate();
-            args.due = { date: data.dueTime ? formatDateTime(date) : formatDate(date) };
-          }
-          todoist.queue(dbId, { type: 'item_update', args });
         }
       }
 
       // update database
-      if (update) await ref.set(data);
+      tasks[assignment.id] = data;
     }));
 
     // get classroom announcements
@@ -188,17 +191,23 @@ async function sync() {
         });
     }
 
-    // update database
-    await courseRef.ref.set({ lastAnnouncement: latest }, { merge: true });
-  }
+    // update todoist
+    res = await todoist.sync();
 
-  // update todoist
-  res = await todoist.sync();
-  for (const [temp, path] of Object.entries(tempIds)) {
-    await db.collection('classroom-tasks').doc(path).set(
-      { todoist: res.temp_id_mapping[temp] },
-      { merge: true },
-    );
+    // update database
+    await courseRef.ref.set({
+      ...course,
+      tasks: Object.keys(tasks).reduce((prev, id) => {
+        if (tempIds[id]) {
+          prev[id] = { ...tasks[id], todoist: res.temp_id_mapping[tempIds[id]] };
+        } else {
+          prev[id] = tasks[id];
+        }
+        return prev;
+      }, {}),
+      lastAnnouncement: latest
+    });
+
   }
 }
 
@@ -207,18 +216,27 @@ async function sync() {
  */
 async function reset() {
   // delete todoist tasks
-  const [ label ] = await todoist.ensureLabels(['classroom']);
+  const [label] = await todoist.ensureLabels(['classroom']);
   const res = await todoist.get(['items']);
   const tasks = res.items.filter(({ labels }) => labels.includes(label));
   console.log(`Deleting ${tasks.length} tasks...`);
-  tasks.forEach(({ id }) => todoist.queue(id, { type: 'item_delete', args: { id } }));
-  await todoist.sync();
+  while (tasks.length) {
+    tasks.splice(0, 100).forEach(({ id }) => todoist.queue(id, { type: 'item_delete', args: { id } }));
+    await todoist.sync();
+  }
   // delete coursework cache
-  const snapshot = await db.collection('classroom-tasks').orderBy('__name__').get();
+  const snapshot = await db.collection('classroom-classes').orderBy('__name__').get();
   if (snapshot.size > 0) {
-    console.log(`Deleting ${snapshot.size} documents...`);
+    console.log(`Cleaning ${snapshot.size} classes...`);
     const batch = db.batch();
-    snapshot.forEach(doc => batch.delete(doc.ref));
+    snapshot.forEach(doc => {
+      const now = new Date();
+      batch.set(doc.ref, {
+        tasks: {},
+        // reset announcement to midnight of the current day
+        lastAnnouncement: Timestamp.fromDate(new Date(now.getFullYear(), now.getMonth(), now.getDate())),
+      }, { merge: true });
+    });
     await batch.commit();
   }
 }
