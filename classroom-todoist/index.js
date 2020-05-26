@@ -52,6 +52,7 @@ async function sync() {
   const labels = await todoist.ensureLabels(['homework', 'automation', 'classroom']);
 
   for (const courseRef of courses) {
+    let update = false;
     // get course data
     const course = courseRef.data();
     const tasks = course.tasks || {};
@@ -115,6 +116,7 @@ async function sync() {
           const temp_id = uuid();
           todoist.queue(dbId, { type: 'item_add', temp_id, args });
           tempIds[assignment.id] = temp_id;
+          update = true;
         }
       } else {
         const oldId = old.todoist;
@@ -141,6 +143,7 @@ async function sync() {
               }
             });
           }
+          update = true;
         }
         if (
           data.title !== old.title ||
@@ -157,6 +160,7 @@ async function sync() {
             }
             todoist.queue(dbId, { type: 'item_update', args });
           }
+          update = true;
         }
       }
 
@@ -191,13 +195,14 @@ async function sync() {
             }
           });
         });
+      update = true;
     }
 
     // update todoist
     res = await todoist.sync();
 
     // update database
-    await courseRef.ref.set({
+    if (update) await courseRef.ref.set({
       ...course,
       tasks: Object.keys(tasks).reduce((prev, id) => {
         if (tempIds[id]) {

@@ -16,12 +16,12 @@ class Todoist {
   queue(name, command) {
     const taskUuid = uuid();
     this.commandNames[taskUuid] = `${name}/${command.type}`;
-    console.log(`[${name}/${command.type}] Todoist sync queued`);
+    console.log(`[todoist/${name}/${command.type}] queued`);
     this.commands.push(Object.assign(command, { uuid: taskUuid }));
   }
 
   async get(resources) {
-    console.log(`Fetching ${resources.join(', ')} from todoist...`);
+    console.log(`[todoist/get] Fetching ${resources.join(', ')} from todoist...`);
     const res = await post('https://api.todoist.com/sync/v8/sync', {
       token: this.token,
       sync_token: '*',
@@ -32,7 +32,11 @@ class Todoist {
   }
 
   async sync() {
-    console.log(`Running ${this.commands.length} todoist commands...`);
+    if (this.commands.length === 0) {
+      console.log('[todoist/sync] Not syncing no commands');
+      return {};
+    }
+    console.log(`[todoist/sync] Running ${this.commands.length} commands...`);
     const res = await post('https://api.todoist.com/sync/v8/sync', {
       token: this.token,
       sync_token: this.sync_token,
@@ -43,9 +47,9 @@ class Todoist {
       for (const [id, status] of Object.entries(res.data.sync_status)) {
         const name = this.commandNames[id];
         if (status === 'ok') {
-          console.log(`[${name}] Todoist sync ok`);
+          console.log(`[todoist/${name}] ok`);
         } else {
-          let errString = `[${name}] Todoist sync error ${status.error_code}: ${status.error}`;
+          let errString = `[todoist/${name}] error ${status.error_code}: ${status.error}`;
           errString += `\n${JSON.stringify(this.commands.find(c => c.uuid === id))}`;
           console.error(errString);
           errors.report(errString);
