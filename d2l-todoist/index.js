@@ -1,4 +1,4 @@
-const { get: GET } = require('axios').default;
+const { get: GET, post: POST } = require('axios').default;
 const cheerio = require('cheerio');
 const { Timestamp } = require('@google-cloud/firestore');
 const Turndown = require('turndown');
@@ -24,6 +24,7 @@ async function login() {
   const ref = db.collection('automation').doc('d2l');
   cache = (await ref.get()).data();
   if (!cache || !cache.cookie || cache.cookieExpire < Timestamp.now()) {
+    console.log('[login] fetching new cookie...');
     // headless browser if in production mode
     const browser = await puppeteer.launch({
       headless: process.env.NODE_ENV === 'production',
@@ -50,13 +51,19 @@ async function login() {
     };
   }
   if (!cache.key || cache.keyExpire < Timestamp.now()) {
-    const res = await GET('https://pdsb.elearningontario.ca/d2l/lp/auth/oauth2/token', {
+    console.log('[login] fetching new API key...');
+    const res = await POST('https://pdsb.elearningontario.ca/d2l/lp/auth/oauth2/token', {
       headers: {
         cookie: cache.cookie
       }
     });
+    if (!res.data.access_token) {
+      console.log('[login] cookie expired...');
+      await ref.set({ cookieExpire: Timestamp.now() });
+      return login();
+    }
     cache.key = res.data.access_token;
-    cache.keyExpire = Timestamp.fromMillis(token.expires_at * 1000);
+    cache.keyExpire = Timestamp.fromMillis(res.data.expires_at * 1000);
   }
   cache.cookieExpire = new Date(Date.now() + 180 * 60 * 1000); // expire after 180 mins
   await ref.set(cache);
@@ -80,9 +87,10 @@ async function sync() {
     let update = false;
     const course = courseRef.data();
     // setup todoist structure
-    const [assignmentSection, miscSection] = await todoist.ensureSections(course.todoist, [
+    const [assignmentSection, lessonSection, miscSection] = await todoist.ensureSections(course.todoist, [
       'automation: d2l assignments',
-      'automation: d2l misc'
+      'automation: d2l lessons',
+      'automation: d2l misc',
     ]);
 
     // latest posts
@@ -152,10 +160,102 @@ async function sync() {
       }
     });
 
+    // lessons
+    const tempIds = [];
+    const lessonURL = `https://pdsb.elearningontario.ca/d2l/api/le/unstable/${course.d2l}/content/toc`;
+    res = await GET(lessonURL, { headers });
+    const lessons = parseModules(course, res.data.Modules);
+
+    for (const [id, lesson] of Object.entries(lessons)) {
+      if (!course.lessons[id]) {
+        let parent = uuid();
+        if (tempIds[lesson.parent]) {
+          parent = tempIds[lesson.parent];
+        } else {
+          const parentSearch = Object.values(course.lessons).find(_ => _.d2l === parent);
+          if (parentSearch && parentSearch.todoist) {
+            parent = parentSearch.todoist;
+          } else {
+            tempIds[lesson.parent] = uuid();
+          }
+        }
+        const temp_id = tempIds[id] ? tempIds[id] : uuid();
+
+        const args = {
+          content: `**Lesson:** [${lesson.name}](${lesson.link})`,
+          priority: 3,
+          project_id: course.todoist,
+          labels, section_id: lessonSection,
+          parent_id: parent,
+        }
+        if (!lesson.children) args.due = { string: 'today' };
+        todoist.queue(`${course.name}/lesson/${id}`, { type: 'item_add', temp_id, args });
+
+        tempIds[id] = temp_id;
+        course.lessons[id] = lesson;
+        update = true;
+      }
+      // TODO: updated lesson
+      // if (course.lessons[id].updated > last) {
+      //   course.lessons[id] = { ...course.lessons[id], ...lesson };
+      //   update = true;
+      // }
+    }
+
+    res = await todoist.sync();
+    course.lessons = Object.keys(course.lessons).reduce((prev, id) => {
+      if (tempIds[id]) {
+        prev[id] = { ...course.lessons[id], todoist: res.temp_id_mapping[tempIds[id]] };
+      } else {
+        prev[id] = course.lessons[id];
+      }
+      return prev;
+    }, {});
     if (update) await courseRef.ref.set(course);
   }
 
-  await todoist.sync();
+}
+
+/**
+ * Parse D2L module toc
+ * @param {object} course Context
+ * @param {object} modules Modules object
+ * @param {string} prefix Name of parent module
+ * @param {number} parentId ID of parent module
+ * @returns {{[id: string]: {
+ *   name: string, d2l: number, link: string, updated: Timestamp, parent: number?, children: boolean
+ * }}}
+ */
+function parseModules(course, modules, prefix = null, parentId = null) {
+  const urlPrefix = `https://pdsb.elearningontario.ca/d2l/le/lessons/${course.d2l}/lessons`;
+  let out = {};
+  for (const Module of modules) {
+    const id = Module.ModuleId;
+    const name = prefix ? `${prefix}/${Module.Title}` : Module.Title;
+    // add current module
+    out[id] = {
+      name,
+      d2l: id,
+      link: `${urlPrefix}/${id}`,
+      updated: Timestamp.fromDate(new Date(Module.LastModifiedDate)),
+      parent: parentId,
+      children: (Module.Topics.length + Module.Modules.length) > 0
+    };
+    // add topics
+    for (const Topic of Module.Topics) {
+      out[Topic.TopicId] = {
+        name: `${name}/${Topic.Title}`,
+        d2l: Topic.TopicId,
+        link: `${urlPrefix}/${Topic.TopicId}`,
+        updated: Timestamp.fromDate(new Date(Topic.LastModifiedDate)),
+        parent: id,
+        children: false,
+      }
+    }
+    // recurse modules and add
+    out = { ...out, ...parseModules(course, Module.Modules, name, id) };
+  }
+  return out;
 }
 
 /**
@@ -173,8 +273,13 @@ async function reset() {
   const snapshot = await db.collection('d2l-classes').orderBy('__name__').get();
   if (snapshot.size > 0) {
     console.log(`Cleaning ${snapshot.size} documents...`);
-    await snapshotMap(snapshot, ({ ref }) =>
-      ref.set({ lastAnnouncement: Timestamp.fromMillis(0), assignments: [] }, { merge: true }));
+    const now = new Date();
+    await snapshotMap(snapshot, ({ ref }) => ref.set({
+      // reset announcement to midnight of the current day
+      lastAnnouncement: Timestamp.fromDate(new Date(now.getFullYear(), now.getMonth(), now.getDate())),
+      assignments: [],
+      lessons: {},
+    }, { merge: true }));
   }
 }
 
