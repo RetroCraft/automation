@@ -80,8 +80,10 @@ async function sync() {
     let update = false;
     const course = courseRef.data();
     // setup todoist structure
-    const assignmentSection = await todoist.ensureSection(course.todoist, 'automation: d2l assignments');
-    const miscSection = await todoist.ensureSection(course.todoist, 'automation: d2l misc');
+    const [assignmentSection, miscSection] = await todoist.ensureSections(course.todoist, [
+      'automation: d2l assignments',
+      'automation: d2l misc'
+    ]);
 
     // latest posts
     res = await GET(`https://prd.activityfeed.ca-central-1.brightspace.com/api/v1/d2l:orgUnit:${course.d2l}/article`, { headers });

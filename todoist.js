@@ -81,19 +81,22 @@ class Todoist {
   /**
    * Get Todoist section ID by project ID and name, queueing creation if it does not exist
    * @param {number} project_id Project ID
-   * @param {string} name Section name
-   * @returns {Promise<number|string>}
+   * @param {string[]} names Section names
+   * @returns {Promise<(number|string)[]>}
    */
-  async ensureSection(project_id, name) {
+  async ensureSections(project_id, names) {
     const { sections } = await this.get(['sections']);
-    const section = sections.find(sec => (sec.project_id === project_id && sec.name === name));
-    if (section) {
-      return section.id;
-    } else {
-      const temp_id = uuid();
-      this.queue(name, { type: 'section_add', temp_id, args: { project_id, name } });
-      return temp_id;
-    }
+    const proj = sections.filter(sec => sec.project_id === project_id);
+    return names.map(name => {
+      const section = proj.find(sec => sec.name === name);
+      if (section) {
+        return section.id;
+      } else {
+        const temp_id = uuid();
+        this.queue(name, { type: 'section_add', temp_id, args: { project_id, name } });
+        return temp_id;
+      }
+    });
   }
 
 }

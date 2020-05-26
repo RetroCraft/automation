@@ -56,8 +56,10 @@ async function sync() {
     const course = courseRef.data();
     const tasks = course.tasks || {};
     // setup todoist structure
-    const assignmentSection = await todoist.ensureSection(course.todoist, 'automation: classroom assignments');
-    const miscSection = await todoist.ensureSection(course.todoist, 'automation: classroom misc');
+    const [assignmentSection, miscSection] = await todoist.ensureSections(course.todoist, [
+      'automation: classroom assignments',
+      'automation: classroom misc'
+    ]);
 
     // get classroom data
     res = await classroom.courses.courseWork.list({
