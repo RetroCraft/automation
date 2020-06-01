@@ -172,11 +172,11 @@ async function sync() {
         if (tempIds[lesson.parent]) {
           parent = tempIds[lesson.parent];
         } else {
-          const parentSearch = Object.values(course.lessons).find(_ => _.d2l === parent);
+          const parentSearch = course.lessons[lesson.parent.toString()];
           if (parentSearch && parentSearch.todoist) {
             parent = parentSearch.todoist;
           } else {
-            tempIds[lesson.parent] = uuid();
+            tempIds[lesson.parent] = parent;
           }
         }
         const temp_id = tempIds[id] ? tempIds[id] : uuid();
@@ -294,3 +294,63 @@ if (require.main === module) {
   if (process.argv[2] === 'reset') reset().catch(e => console.error(e));
   else sync().catch(e => console.error(e));
 }
+
+/*
+Okay side note. The schemas used in this "API" are atrocious - especially the module TOC endpoint.
+Let's try and mock this one up:
+```ts
+interface TableOfContents {
+  Modules: Module[];
+}
+
+interface Entry {
+  SortOrder: number;
+  StartDateTime: null;
+  EndDateTime: null;
+  IsHidden: boolean;
+  IsLocked: boolean;
+  HasReleaseConditions: false;
+  Title: string;
+  LastModifiedDate: string;
+}
+
+interface Module extends Entry {
+  // note that this is dependent on the COURSE, a URL PARAMETER!! so it will be identical everywhere
+  // because you can only request a TOC for one course at a time
+  DefaultPath: "/content/CONSTANT_STRING";
+  CompositionHash: number;
+  ModuleId: number;
+  // yeah. this is recursive to arbitrary depth.
+  Modules: Module[];
+  Topics: Topic[];
+  // could not tell you what these do
+  PacingStartDate: null;
+  PacingEndDate: null;
+  Description: null;
+}
+
+interface Topic extends Entry {
+  IsBroken: false;
+  // different ID number from TopicId/Identifier. URL does not resolve (in fact, ids.brightspace.com has no DNS record)
+  ActivityId: "https://ids.brightspace.com/activities/contenttopic/ID_NUMBER";
+  IsExempt: false;
+  TopicId: number;
+  // literally just a string form of TopicId (if TopicId === 123, Identifier === '123')
+  Identifier: string(TopicId);
+  ActivityType: number;
+  TypeIdentifier: string;
+  Bookmarked: boolean;
+  Unread: boolean;
+  // note that this is the path to an attachment (i.e. downloadable file)
+  Url: "/content/PATH_TO_ATTACHMENT";
+  // honestly no idea what these do
+  ToolId: null;
+  ToolItemId: null;
+  GradeItemId: null;
+  Description: {
+    Text: '';
+    Html: '';
+  }
+}
+```
+*/
