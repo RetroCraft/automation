@@ -155,6 +155,7 @@ async function sync() {
             priority: 2,
             project_id: course.todoist,
             labels, section_id: assignmentSection,
+            due: { string: 'today' },
           }
         });
       }
@@ -169,14 +170,16 @@ async function sync() {
     for (const [id, lesson] of Object.entries(lessons)) {
       if (!course.lessons[id]) {
         let parent = uuid();
-        if (tempIds[lesson.parent]) {
-          parent = tempIds[lesson.parent];
-        } else {
-          const parentSearch = course.lessons[lesson.parent.toString()];
-          if (parentSearch && parentSearch.todoist) {
-            parent = parentSearch.todoist;
+        if (lesson.parent) {
+          if (tempIds[lesson.parent]) {
+            parent = tempIds[lesson.parent];
           } else {
-            tempIds[lesson.parent] = parent;
+            const parentSearch = course.lessons[lesson.parent.toString()];
+            if (parentSearch && parentSearch.todoist) {
+              parent = parentSearch.todoist;
+            } else {
+              tempIds[lesson.parent] = parent;
+            }
           }
         }
         const temp_id = tempIds[id] ? tempIds[id] : uuid();
