@@ -93,3 +93,8 @@ module.exports.snapshotMap = (snapshot, callback) => {
   });
   return Promise.all(promises);
 };
+
+module.exports.log = (message, severity = 'NOTICE') => {
+  if (process.env.NODE_ENV === 'production') console.log(JSON.stringify({ message, severity }));
+  else console.log(message);
+}

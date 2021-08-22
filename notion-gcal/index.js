@@ -2,7 +2,7 @@ const { db, errors } = require('../google');
 const {
   authorize,
   getNewToken,
-  snapshotMap
+  log,
 } = require('../utils');
 
 // APIs
@@ -92,7 +92,8 @@ async function sync() {
 
   let updated = false;
   for (const deliverable of deliverables) {
-    if (!cache[deliverable.id]) {
+    const cacheEntry = cache[deliverable.id];
+    if (!cacheEntry) {
       // create new event
       const res = await calendar.events.insert({
         calendarId: CALENDAR_ID,
@@ -107,18 +108,18 @@ async function sync() {
           end: toGcalDate(deliverable.end),
         }
       });
-      console.log(`Inserted ${deliverable.course}/${deliverable.title}`);
+      log(`Inserted ${deliverable.course}/${deliverable.title} (${res.data.id})`);
 
       cache[deliverable.id] = {
         eventId: res.data.id,
         updated: deliverable.updated,
       }
       updated = true;
-    } else if (cache[deliverable.id].updated < deliverable.updated) {
+    } else if (cacheEntry.updated < deliverable.updated) {
       // update existing event
       await calendar.events.patch({
         calendarId: CALENDAR_ID,
-        eventId: cache[deliverable.id].eventId,
+        eventId: cacheEntry.eventId,
         requestBody: {
           summary: deliverable.title,
           source: {
@@ -130,9 +131,28 @@ async function sync() {
           end: toGcalDate(deliverable.end),
         }
       });
-      console.log(`Updated ${deliverable.course}/${deliverable.title}`);
+      log(`Updated ${deliverable.course}/${deliverable.title} (${cacheEntry.eventId})`);
 
       cache[deliverable.id].updated = deliverable.updated;
+      updated = true;
+    }
+  }
+
+  // process deletions
+  for (const pageId of Object.keys(cache)) {
+    const deliverable = deliverables.find((x) => x.id === pageId);
+    if (!deliverable) {
+      const { data } = await calendar.events.get({ calendarId: CALENDAR_ID, eventId: cache[pageId].eventId });
+
+      if (data.status !== 'cancelled') {
+        await calendar.events.delete({
+          calendarId: CALENDAR_ID,
+          eventId: data.id,
+        });
+        log(`Deleted ${data.summary} (${data.id})`);
+      }
+
+      delete cache[data.id];
       updated = true;
     }
   }
@@ -157,8 +177,8 @@ async function reset() {
 
 module.exports.entry = async () => {
   await sync().catch(e => {
-    console.error(e);
-    errors.report(e);
+    if (process.env.NODE_ENV === 'production') errors.report(e);
+    else console.error(e);
   });
 }
 
