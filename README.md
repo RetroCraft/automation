@@ -4,6 +4,9 @@ Assorted automation scripts and cloud functions.
 
 Google Cloud Platform service account key required at `keyfile.auth.json` and API credentials at `credentials.auth.json`.
 
+Deploy using `gcloud functions deploy camelCaseName`.
+Include `--runtime nodejs14` and `--trigger-topic [minute|half-hour]` on first deploy.
+
 ## Scripts
 
 ### classroom-todoist
@@ -28,3 +31,9 @@ One-way sync from D2L to Todoist.
 
 Requires D2L email and password in `d2l.auth.json`.
 Deployed to Google Cloud Functions and attached to Cloud Scheduler every half hour with Pub/Sub.
+
+### notion-gcal
+
+One-way sync from Notion to Google Calendar.
+
+Requires Notion API key in `notion.auth.json`.
