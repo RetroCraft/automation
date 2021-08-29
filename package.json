@@ -14,7 +14,7 @@
     "@google-cloud/error-reporting": "^1.1.3",
     "@google-cloud/firestore": "^3.8.0",
     "@notionhq/client": "^0.3.0",
-    "axios": "^0.19.2",
+    "axios": "^0.21.1",
     "cheerio": "^1.0.0-rc.3",
     "googleapis": "^51.0.0",
     "puppeteer": "^2.1.1",
