@@ -29,8 +29,8 @@ const COURSE_COLORS = {
   'CS 245': '#ff887c',
   'CS 246': '#ffb878',
   'BU 127': '#fbd75b',
-  'BU 283': '#51b749',
-  'BU 288': '#7ae7bf'
+  'BU 283': '#7cb342', // (calendar colour)
+  'BU 288': '#51b749'
 }
 
 async function sync() {
@@ -46,8 +46,9 @@ async function sync() {
   });
   const CourseMap = {};
   courseQuery.results.forEach((page) => {
-    const title = page.properties['Name'].title[0].text.content;
-    CourseMap[page.id] = title;
+    const title = page.properties?.Name?.title?.[0]?.text?.content;
+    if (!title) log(`Page ${page.id} has no title`, 'WARN');
+    CourseMap[page.id] = title ?? 'Untitled';
   });
 
   // load cache, which stores { [id: Notion Page ID]: { eventId: string, updated: Timestamp } }
@@ -66,6 +67,10 @@ async function sync() {
         {
           property: 'Term',
           rollup: { any: { select: { equals: ACTIVE_TERM } } }
+        },
+        {
+          property: 'Course',
+          relation: { is_not_empty: true }
         }
       ]
     }
@@ -93,21 +98,22 @@ async function sync() {
   let updated = false;
   for (const deliverable of deliverables) {
     const cacheEntry = cache[deliverable.id];
+    const requestBody = {
+      summary: `${deliverable.course} - ${deliverable.title}`,
+      source: {
+        title: deliverable.title,
+        url: deliverable.url,
+      }
+    };
+    // add color
+    if (ColorMap?.[COURSE_COLORS?.[deliverable.course]]) requestBody.colorId = ColorMap[COURSE_COLORS[deliverable.course]];
+    // add start and end date
+    requestBody.start = toGcalDate(deliverable.start);
+    requestBody.end = deliverable.end ? toGcalDate(deliverable.end) : requestBody.start;
+
     if (!cacheEntry) {
       // create new event
-      const res = await calendar.events.insert({
-        calendarId: CALENDAR_ID,
-        requestBody: {
-          summary: deliverable.title,
-          source: {
-            title: deliverable.title,
-            url: deliverable.url,
-          },
-          colorId: ColorMap[COURSE_COLORS[deliverable.course]],
-          start: toGcalDate(deliverable.start),
-          end: toGcalDate(deliverable.end),
-        }
-      });
+      const res = await calendar.events.insert({ calendarId: CALENDAR_ID, requestBody });
       log(`Inserted ${deliverable.course}/${deliverable.title} (${res.data.id})`);
 
       cache[deliverable.id] = {
@@ -120,16 +126,7 @@ async function sync() {
       await calendar.events.patch({
         calendarId: CALENDAR_ID,
         eventId: cacheEntry.eventId,
-        requestBody: {
-          summary: deliverable.title,
-          source: {
-            title: deliverable.title,
-            url: deliverable.url,
-          },
-          colorId: ColorMap[COURSE_COLORS[deliverable.course]],
-          start: toGcalDate(deliverable.start),
-          end: toGcalDate(deliverable.end),
-        }
+        requestBody
       });
       log(`Updated ${deliverable.course}/${deliverable.title} (${cacheEntry.eventId})`);
 
@@ -168,7 +165,13 @@ async function reset() {
   process.stdout.write(`Deleting ${Object.keys(cache).length} events`);
   for (const { eventId } of Object.values(cache)) {
     process.stdout.write('.');
-    await calendar.events.delete({ calendarId: CALENDAR_ID, eventId });
+    try {
+      await calendar.events.delete({ calendarId: CALENDAR_ID, eventId });
+    } catch (e) {
+      // ignore already deleted errors
+      if (e.code === 410) continue;
+      throw e;
+    }
   }
   process.stdout.write('\n');
   // clear cache
