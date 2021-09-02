@@ -89,68 +89,78 @@ async function sync() {
   });
 
   const toGcalDate = (string) => {
+    const date = { date: null, dateTime: null, timeZone: 'America/Toronto' }
     // YYYY-MM-DD
-    if (string.length === 10) return { date: string };
-    // YYYY-MM-DDThh:mm:ss.SSSZ
-    else return { dateTime: string };
+    if (string.length === 10) date.date = string;
+    // YYYY-MM-DDThh:mm:ss
+    else date.dateTime = string.substring(0, 19);
+    return date;
   }
 
   let updated = false;
   for (const deliverable of deliverables) {
-    const cacheEntry = cache[deliverable.id];
-    const requestBody = {
-      summary: `${deliverable.course} - ${deliverable.title}`,
-      source: {
-        title: deliverable.title,
-        url: deliverable.url,
+    try {
+      const cacheEntry = cache[deliverable.id];
+      const requestBody = {
+        summary: `${deliverable.course} - ${deliverable.title}`,
+        source: {
+          title: deliverable.title,
+          url: deliverable.url,
+        }
+      };
+      // add color
+      if (ColorMap?.[COURSE_COLORS?.[deliverable.course]]) requestBody.colorId = ColorMap[COURSE_COLORS[deliverable.course]];
+      // add start and end date
+      requestBody.start = toGcalDate(deliverable.start);
+      requestBody.end = deliverable.end ? toGcalDate(deliverable.end) : requestBody.start;
+
+      if (!cacheEntry) {
+        // create new event
+        const res = await calendar.events.insert({ calendarId: CALENDAR_ID, requestBody });
+        log(`Inserted ${deliverable.course}/${deliverable.title} (${res.data.id})`);
+
+        cache[deliverable.id] = {
+          eventId: res.data.id,
+          updated: deliverable.updated,
+        }
+        updated = true;
+      } else if (cacheEntry.updated < deliverable.updated) {
+        // update existing event
+        await calendar.events.patch({
+          calendarId: CALENDAR_ID,
+          eventId: cacheEntry.eventId,
+          requestBody
+        });
+        log(`Updated ${deliverable.course}/${deliverable.title} (${cacheEntry.eventId})`);
+
+        cache[deliverable.id].updated = deliverable.updated;
+        updated = true;
       }
-    };
-    // add color
-    if (ColorMap?.[COURSE_COLORS?.[deliverable.course]]) requestBody.colorId = ColorMap[COURSE_COLORS[deliverable.course]];
-    // add start and end date
-    requestBody.start = toGcalDate(deliverable.start);
-    requestBody.end = deliverable.end ? toGcalDate(deliverable.end) : requestBody.start;
-
-    if (!cacheEntry) {
-      // create new event
-      const res = await calendar.events.insert({ calendarId: CALENDAR_ID, requestBody });
-      log(`Inserted ${deliverable.course}/${deliverable.title} (${res.data.id})`);
-
-      cache[deliverable.id] = {
-        eventId: res.data.id,
-        updated: deliverable.updated,
-      }
-      updated = true;
-    } else if (cacheEntry.updated < deliverable.updated) {
-      // update existing event
-      await calendar.events.patch({
-        calendarId: CALENDAR_ID,
-        eventId: cacheEntry.eventId,
-        requestBody
-      });
-      log(`Updated ${deliverable.course}/${deliverable.title} (${cacheEntry.eventId})`);
-
-      cache[deliverable.id].updated = deliverable.updated;
-      updated = true;
+    } catch (e) {
+      log(e, 'ERROR');
     }
   }
 
   // process deletions
   for (const pageId of Object.keys(cache)) {
-    const deliverable = deliverables.find((x) => x.id === pageId);
-    if (!deliverable) {
-      const { data } = await calendar.events.get({ calendarId: CALENDAR_ID, eventId: cache[pageId].eventId });
+    try {
+      const deliverable = deliverables.find((x) => x.id === pageId);
+      if (!deliverable) {
+        const { data } = await calendar.events.get({ calendarId: CALENDAR_ID, eventId: cache[pageId].eventId });
 
-      if (data.status !== 'cancelled') {
-        await calendar.events.delete({
-          calendarId: CALENDAR_ID,
-          eventId: data.id,
-        });
-        log(`Deleted ${data.summary} (${data.id})`);
+        if (data.status !== 'cancelled') {
+          await calendar.events.delete({
+            calendarId: CALENDAR_ID,
+            eventId: data.id,
+          });
+          log(`Deleted ${data.summary} (${data.id})`);
+        }
+
+        delete cache[data.id];
+        updated = true;
       }
-
-      delete cache[data.id];
-      updated = true;
+    } catch (e) {
+      log(e, 'ERROR');
     }
   }
 
