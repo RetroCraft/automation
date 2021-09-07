@@ -33,6 +33,18 @@ const COURSE_COLORS = {
   'BU 288': '#51b749'
 }
 
+async function dbQueryAll(options) {
+  options.page_size = 100;
+  const query = await notion.databases.query(options);
+  const items = query.results;
+  if (query.has_more) {
+    options.start_cursor = query.next_cursor;
+    return items.concat(await dbQueryAll(options));
+  } else {
+    return items;
+  }
+}
+
 async function sync() {
   // load colors
   const eventColors = (await calendar.colors.get()).data.event;
@@ -56,7 +68,7 @@ async function sync() {
   const cache = (await doc.get()).data();
 
   // load notion
-  const deliverableQuery = await notion.databases.query({
+  const deliverableQuery = await dbQueryAll({
     database_id: DELIVERABLE_DATABASE_ID,
     filter: {
       and: [
@@ -75,7 +87,7 @@ async function sync() {
       ]
     }
   });
-  const deliverables = deliverableQuery.results.map((page) => {
+  const deliverables = deliverableQuery.map((page) => {
     // return only the fields that we care about
     return {
       id: page.id,
@@ -84,7 +96,8 @@ async function sync() {
       updated: Timestamp.fromDate(new Date(page.last_edited_time)),
       course: CourseMap[page.properties['Course'].relation[0].id],
       start: page.properties['Date'].date.start,
-      end: page.properties['Date'].date.end
+      end: page.properties['Date'].date.end,
+      type: page.properties['Tags'].multi_select.map((tag) => tag.name)
     }
   });
 
@@ -110,9 +123,16 @@ async function sync() {
       };
       // add color
       if (ColorMap?.[COURSE_COLORS?.[deliverable.course]]) requestBody.colorId = ColorMap[COURSE_COLORS[deliverable.course]];
-      // add start and end date
-      requestBody.start = toGcalDate(deliverable.start);
-      requestBody.end = deliverable.end ? toGcalDate(deliverable.end) : requestBody.start;
+      // add start and end date (only show times for assessments)
+      const start = toGcalDate(deliverable.start);
+      const end = deliverable.end ? toGcalDate(deliverable.end) : null;
+      if (deliverable.type.includes('Assessment')) {
+        requestBody.start = start;
+        requestBody.end = end ?? start;
+      } else {
+        requestBody.start = end ?? start;
+        requestBody.end = end ?? start;
+      }
 
       if (!cacheEntry) {
         // create new event
